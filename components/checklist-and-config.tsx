@@ -35,6 +35,7 @@ export default function ChecklistAndConfig({
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumber[]>([]);
   const [currentNumberSid, setCurrentNumberSid] = useState("");
   const [currentVoiceUrl, setCurrentVoiceUrl] = useState("");
+  const [phoneNumbersError, setPhoneNumbersError] = useState<string | null>(null);
 
   const [allChecksPassed, setAllChecksPassed] = useState(false);
   const [webhookLoading, setWebhookLoading] = useState(false);
@@ -42,9 +43,13 @@ export default function ChecklistAndConfig({
   // AWS Amplify環境では、Webhook URLは現在のドメインを使用
   const currentDomain = typeof window !== 'undefined' ? window.location.origin : '';
   const webhookUrl = currentDomain ? `${currentDomain}/api/twilio/webhook` : "";
+  
+  // 開発環境（localhost）ではWebhook URLの更新をスキップ
+  const isDevelopment = currentDomain.includes('localhost') || currentDomain.includes('127.0.0.1');
+  const shouldSkipWebhookUpdate = isDevelopment;
 
   const isWebhookMismatch =
-    webhookUrl && currentVoiceUrl && webhookUrl !== currentVoiceUrl;
+    webhookUrl && currentVoiceUrl && webhookUrl !== currentVoiceUrl && !shouldSkipWebhookUpdate;
 
   useEffect(() => {
     let polling = true;
@@ -59,8 +64,17 @@ export default function ChecklistAndConfig({
 
         // 2. Fetch numbers
         res = await fetch("/api/twilio/numbers");
-        if (!res.ok) throw new Error("Failed to fetch phone numbers");
+        if (!res.ok) {
+          const errorData = await res.json();
+          console.error("Failed to fetch phone numbers:", errorData);
+          setPhoneNumbersError(errorData.error || res.statusText);
+          throw new Error(`Failed to fetch phone numbers: ${errorData.error || res.statusText}`);
+        }
         const numbersData = await res.json();
+        console.log("Phone numbers response:", numbersData);
+        
+        setPhoneNumbersError(null); // Clear any previous errors
+        
         if (Array.isArray(numbersData) && numbersData.length > 0) {
           setPhoneNumbers(numbersData);
           // If currentNumberSid not set or not in the list, use first
@@ -70,9 +84,13 @@ export default function ChecklistAndConfig({
           setCurrentNumberSid(selected.sid);
           setCurrentVoiceUrl(selected.voiceUrl || "");
           setSelectedPhoneNumber(selected.friendlyName || "");
+        } else {
+          console.log("No phone numbers found in response");
+          setPhoneNumbers([]);
+          setPhoneNumbersError("電話番号が見つかりません。Twilio Consoleで電話番号を購入してください。");
         }
       } catch (err) {
-        console.error(err);
+        console.error("Polling error:", err);
       }
     };
 
@@ -85,6 +103,11 @@ export default function ChecklistAndConfig({
   }, [currentNumberSid, setSelectedPhoneNumber]);
 
   const updateWebhook = async () => {
+    if (shouldSkipWebhookUpdate) {
+      console.log("Skipping webhook update in development environment");
+      return;
+    }
+    
     if (!currentNumberSid || !webhookUrl) return;
     try {
       setWebhookLoading(true);
@@ -123,7 +146,9 @@ export default function ChecklistAndConfig({
       {
         label: "Twilio電話番号の設定",
         done: phoneNumbers.length > 0,
-        description: "月額約$1.15の費用がかかります",
+        description: phoneNumbersError 
+          ? phoneNumbersError 
+          : "月額約$1.15の費用がかかります",
         field:
           phoneNumbers.length > 0 ? (
             phoneNumbers.length === 1 ? (
@@ -168,9 +193,15 @@ export default function ChecklistAndConfig({
       },
       {
         label: "Webhook URLの更新",
-        done: !!webhookUrl && !isWebhookMismatch,
-        description: "Twilioコンソールで手動設定することも可能です",
-        field: (
+        done: shouldSkipWebhookUpdate || (!!webhookUrl && !isWebhookMismatch),
+        description: shouldSkipWebhookUpdate 
+          ? "開発環境では自動的にスキップされます（本番環境で設定してください）"
+          : "Twilioコンソールで手動設定することも可能です",
+        field: shouldSkipWebhookUpdate ? (
+          <div className="text-sm text-gray-500">
+            開発環境では自動スキップ
+          </div>
+        ) : (
           <div className="flex items-center gap-2 w-full">
             <div className="flex-1">
               <Input value={currentVoiceUrl} disabled className="w-full" />
@@ -200,7 +231,9 @@ export default function ChecklistAndConfig({
     currentVoiceUrl,
     isWebhookMismatch,
     webhookLoading,
+    phoneNumbersError,
     setSelectedPhoneNumber,
+    shouldSkipWebhookUpdate,
   ]);
 
   useEffect(() => {
@@ -221,7 +254,10 @@ export default function ChecklistAndConfig({
         <DialogHeader>
           <DialogTitle>セットアップチェックリスト</DialogTitle>
           <DialogDescription>
-            このアプリを使用する前に、以下の手順を完了してください
+            {shouldSkipWebhookUpdate 
+              ? "開発環境では一部の設定が自動的にスキップされます。本番環境では全ての設定が必要です。"
+              : "このアプリを使用する前に、以下の手順を完了してください"
+            }
           </DialogDescription>
         </DialogHeader>
 
