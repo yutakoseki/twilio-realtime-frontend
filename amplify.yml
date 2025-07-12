@@ -4,9 +4,6 @@ frontend:
     preBuild:
       commands:
         - npm install
-        - echo "Checking environment variables..."
-        - echo "TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:+configured}"
-        - echo "TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:+configured}"
     build:
       commands:
         - npm run build
