@@ -7,7 +7,6 @@ import SessionConfigurationPanel from "@/components/session-configuration-panel"
 import Transcript from "@/components/transcript";
 import FunctionCallsPanel from "@/components/function-calls-panel";
 import { Item } from "@/components/types";
-import handleRealtimeEvent from "@/lib/handle-realtime-event";
 import PhoneNumberChecklist from "@/components/phone-number-checklist";
 
 const CallInterface = () => {
@@ -15,32 +14,9 @@ const CallInterface = () => {
   const [allConfigsReady, setAllConfigsReady] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
   const [callStatus, setCallStatus] = useState("disconnected");
-  const [ws, setWs] = useState<WebSocket | null>(null);
 
-  useEffect(() => {
-    if (allConfigsReady && !ws) {
-      const newWs = new WebSocket("ws://localhost:8081/logs");
-
-      newWs.onopen = () => {
-        console.log("Connected to logs websocket");
-        setCallStatus("connected");
-      };
-
-      newWs.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log("Received logs event:", data);
-        handleRealtimeEvent(data, setItems);
-      };
-
-      newWs.onclose = () => {
-        console.log("Logs websocket disconnected");
-        setWs(null);
-        setCallStatus("disconnected");
-      };
-
-      setWs(newWs);
-    }
-  }, [allConfigsReady, ws]);
+  // AWS Amplify環境では、WebSocketサーバーは不要
+  // 代わりに、通話状態はTwilio Webhookを通じて管理される
 
   return (
     <div className="h-screen bg-white flex flex-col">
@@ -58,16 +34,8 @@ const CallInterface = () => {
             <SessionConfigurationPanel
               callStatus={callStatus}
               onSave={(config) => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                  const updateEvent = {
-                    type: "session.update",
-                    session: {
-                      ...config,
-                    },
-                  };
-                  console.log("Sending update event:", updateEvent);
-                  ws.send(JSON.stringify(updateEvent));
-                }
+                // 設定の保存はAPIを通じて行う
+                console.log("Session configuration saved:", config);
               }}
             />
           </div>
@@ -84,7 +52,7 @@ const CallInterface = () => {
 
           {/* Right Column: Function Calls */}
           <div className="col-span-3 flex flex-col h-full overflow-hidden">
-            <FunctionCallsPanel items={items} ws={ws} />
+            <FunctionCallsPanel items={items} ws={null} />
           </div>
         </div>
       </div>

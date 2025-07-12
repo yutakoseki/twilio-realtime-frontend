@@ -36,17 +36,15 @@ export default function ChecklistAndConfig({
   const [currentNumberSid, setCurrentNumberSid] = useState("");
   const [currentVoiceUrl, setCurrentVoiceUrl] = useState("");
 
-  const [publicUrl, setPublicUrl] = useState("");
-  const [localServerUp, setLocalServerUp] = useState(false);
-  const [publicUrlAccessible, setPublicUrlAccessible] = useState(false);
-
   const [allChecksPassed, setAllChecksPassed] = useState(false);
   const [webhookLoading, setWebhookLoading] = useState(false);
-  const [ngrokLoading, setNgrokLoading] = useState(false);
 
-  const appendedTwimlUrl = publicUrl ? `${publicUrl}/twiml` : "";
+  // AWS Amplify環境では、Webhook URLは現在のドメインを使用
+  const currentDomain = typeof window !== 'undefined' ? window.location.origin : '';
+  const webhookUrl = currentDomain ? `${currentDomain}/api/twilio/webhook` : "";
+
   const isWebhookMismatch =
-    appendedTwimlUrl && currentVoiceUrl && appendedTwimlUrl !== currentVoiceUrl;
+    webhookUrl && currentVoiceUrl && webhookUrl !== currentVoiceUrl;
 
   useEffect(() => {
     let polling = true;
@@ -73,30 +71,13 @@ export default function ChecklistAndConfig({
           setCurrentVoiceUrl(selected.voiceUrl || "");
           setSelectedPhoneNumber(selected.friendlyName || "");
         }
-
-        // 3. Check local server & public URL
-        let foundPublicUrl = "";
-        try {
-          const resLocal = await fetch("http://localhost:8081/public-url");
-          if (resLocal.ok) {
-            const pubData = await resLocal.json();
-            foundPublicUrl = pubData?.publicUrl || "";
-            setLocalServerUp(true);
-            setPublicUrl(foundPublicUrl);
-          } else {
-            throw new Error("Local server not responding");
-          }
-        } catch {
-          setLocalServerUp(false);
-          setPublicUrl("");
-        }
       } catch (err) {
         console.error(err);
       }
     };
 
     pollChecks();
-    const intervalId = setInterval(() => polling && pollChecks(), 1000);
+    const intervalId = setInterval(() => polling && pollChecks(), 2000);
     return () => {
       polling = false;
       clearInterval(intervalId);
@@ -104,7 +85,7 @@ export default function ChecklistAndConfig({
   }, [currentNumberSid, setSelectedPhoneNumber]);
 
   const updateWebhook = async () => {
-    if (!currentNumberSid || !appendedTwimlUrl) return;
+    if (!currentNumberSid || !webhookUrl) return;
     try {
       setWebhookLoading(true);
       const res = await fetch("/api/twilio/numbers", {
@@ -112,11 +93,11 @@ export default function ChecklistAndConfig({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phoneNumberSid: currentNumberSid,
-          voiceUrl: appendedTwimlUrl,
+          voiceUrl: webhookUrl,
         }),
       });
       if (!res.ok) throw new Error("Failed to update webhook");
-      setCurrentVoiceUrl(appendedTwimlUrl);
+      setCurrentVoiceUrl(webhookUrl);
     } catch (err) {
       console.error(err);
     } finally {
@@ -124,50 +105,25 @@ export default function ChecklistAndConfig({
     }
   };
 
-  const checkNgrok = async () => {
-    if (!localServerUp || !publicUrl) return;
-    setNgrokLoading(true);
-    let success = false;
-    for (let i = 0; i < 5; i++) {
-      try {
-        const resTest = await fetch(publicUrl + "/public-url");
-        if (resTest.ok) {
-          setPublicUrlAccessible(true);
-          success = true;
-          break;
-        }
-      } catch {
-        // retry
-      }
-      if (i < 4) {
-        await new Promise((r) => setTimeout(r, 3000));
-      }
-    }
-    if (!success) {
-      setPublicUrlAccessible(false);
-    }
-    setNgrokLoading(false);
-  };
-
   const checklist = useMemo(() => {
     return [
       {
-        label: "Set up Twilio account",
+        label: "Twilioアカウントの設定",
         done: hasCredentials,
-        description: "Then update account details in webapp/.env",
+        description: "環境変数でTWILIO_ACCOUNT_SIDとTWILIO_AUTH_TOKENを設定してください",
         field: (
           <Button
             className="w-full"
             onClick={() => window.open("https://console.twilio.com/", "_blank")}
           >
-            Open Twilio Console
+            Twilioコンソールを開く
           </Button>
         ),
       },
       {
-        label: "Set up Twilio phone number",
+        label: "Twilio電話番号の設定",
         done: phoneNumbers.length > 0,
-        description: "Costs around $1.15/month",
+        description: "月額約$1.15の費用がかかります",
         field:
           phoneNumbers.length > 0 ? (
             phoneNumbers.length === 1 ? (
@@ -185,7 +141,7 @@ export default function ChecklistAndConfig({
                 value={currentNumberSid}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a phone number" />
+                  <SelectValue placeholder="電話番号を選択" />
                 </SelectTrigger>
                 <SelectContent>
                   {phoneNumbers.map((phone) => (
@@ -206,46 +162,14 @@ export default function ChecklistAndConfig({
                 )
               }
             >
-              Set up Twilio phone number
+              Twilio電話番号を設定
             </Button>
           ),
       },
       {
-        label: "Start local WebSocket server",
-        done: localServerUp,
-        description: "cd websocket-server && npm run dev",
-        field: null,
-      },
-      {
-        label: "Start ngrok",
-        done: publicUrlAccessible,
-        description: "Then set ngrok URL in websocket-server/.env",
-        field: (
-          <div className="flex items-center gap-2 w-full">
-            <div className="flex-1">
-              <Input value={publicUrl} disabled />
-            </div>
-            <div className="flex-1">
-              <Button
-                variant="outline"
-                onClick={checkNgrok}
-                disabled={ngrokLoading || !localServerUp || !publicUrl}
-                className="w-full"
-              >
-                {ngrokLoading ? (
-                  <Loader2 className="mr-2 h-4 animate-spin" />
-                ) : (
-                  "Check ngrok"
-                )}
-              </Button>
-            </div>
-          </div>
-        ),
-      },
-      {
-        label: "Update Twilio webhook URL",
-        done: !!publicUrl && !isWebhookMismatch,
-        description: "Can also be done manually in Twilio console",
+        label: "Webhook URLの更新",
+        done: !!webhookUrl && !isWebhookMismatch,
+        description: "Twilioコンソールで手動設定することも可能です",
         field: (
           <div className="flex items-center gap-2 w-full">
             <div className="flex-1">
@@ -260,7 +184,7 @@ export default function ChecklistAndConfig({
                 {webhookLoading ? (
                   <Loader2 className="mr-2 h-4 animate-spin" />
                 ) : (
-                  "Update Webhook"
+                  "Webhookを更新"
                 )}
               </Button>
             </div>
@@ -272,26 +196,16 @@ export default function ChecklistAndConfig({
     hasCredentials,
     phoneNumbers,
     currentNumberSid,
-    localServerUp,
-    publicUrl,
-    publicUrlAccessible,
+    webhookUrl,
     currentVoiceUrl,
     isWebhookMismatch,
-    appendedTwimlUrl,
     webhookLoading,
-    ngrokLoading,
     setSelectedPhoneNumber,
   ]);
 
   useEffect(() => {
     setAllChecksPassed(checklist.every((item) => item.done));
   }, [checklist]);
-
-  useEffect(() => {
-    if (!ready) {
-      checkNgrok();
-    }
-  }, [localServerUp, ready]);
 
   useEffect(() => {
     if (!allChecksPassed) {
@@ -305,9 +219,9 @@ export default function ChecklistAndConfig({
     <Dialog open={!ready}>
       <DialogContent className="w-full max-w-[800px]">
         <DialogHeader>
-          <DialogTitle>Setup Checklist</DialogTitle>
+          <DialogTitle>セットアップチェックリスト</DialogTitle>
           <DialogDescription>
-            This sample app requires a few steps before you get started
+            このアプリを使用する前に、以下の手順を完了してください
           </DialogDescription>
         </DialogHeader>
 
@@ -343,7 +257,7 @@ export default function ChecklistAndConfig({
             onClick={handleDone}
             disabled={!allChecksPassed}
           >
-            Let's go!
+            開始する！
           </Button>
         </div>
       </DialogContent>
