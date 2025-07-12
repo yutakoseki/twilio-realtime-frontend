@@ -36,6 +36,7 @@ export default function ChecklistAndConfig({
   const [currentNumberSid, setCurrentNumberSid] = useState("");
   const [currentVoiceUrl, setCurrentVoiceUrl] = useState("");
   const [phoneNumbersError, setPhoneNumbersError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [allChecksPassed, setAllChecksPassed] = useState(false);
   const [webhookLoading, setWebhookLoading] = useState(false);
@@ -53,6 +54,8 @@ export default function ChecklistAndConfig({
 
   useEffect(() => {
     let polling = true;
+    let pollCount = 0;
+    const maxPolls = 10; // 最大10回までポーリング
 
     const pollChecks = async () => {
       try {
@@ -67,8 +70,11 @@ export default function ChecklistAndConfig({
         if (!res.ok) {
           const errorData = await res.json();
           console.error("Failed to fetch phone numbers:", errorData);
-          setPhoneNumbersError(errorData.error || res.statusText);
-          throw new Error(`Failed to fetch phone numbers: ${errorData.error || res.statusText}`);
+          const errorMessage = errorData.details?.hasAccountSid === false || errorData.details?.hasAuthToken === false
+            ? "Twilio認証情報が設定されていません。AWS Amplifyコンソールで環境変数を確認してください。"
+            : errorData.error || res.statusText;
+          setPhoneNumbersError(errorMessage);
+          throw new Error(`Failed to fetch phone numbers: ${errorMessage}`);
         }
         const numbersData = await res.json();
         console.log("Phone numbers response:", numbersData);
@@ -77,13 +83,30 @@ export default function ChecklistAndConfig({
         
         if (Array.isArray(numbersData) && numbersData.length > 0) {
           setPhoneNumbers(numbersData);
-          // If currentNumberSid not set or not in the list, use first
-          const selected =
-            numbersData.find((p: PhoneNumber) => p.sid === currentNumberSid) ||
-            numbersData[0];
+          
+          // 電話番号の選択ロジックを改善
+          let selected;
+          
+          // 1. 既に選択されている番号がある場合はそれを維持
+          if (currentNumberSid) {
+            selected = numbersData.find((p: PhoneNumber) => p.sid === currentNumberSid);
+          }
+          
+          // 2. 選択されていない場合は、最も適切な番号を選択
+          if (!selected) {
+            // 優先順位: 1) 既にWebhookが設定されている番号 2) 最初の番号
+            selected = numbersData.find((p: PhoneNumber) => p.voiceUrl && p.voiceUrl.trim() !== '') ||
+                      numbersData[0];
+          }
+          
           setCurrentNumberSid(selected.sid);
           setCurrentVoiceUrl(selected.voiceUrl || "");
           setSelectedPhoneNumber(selected.friendlyName || "");
+          
+          console.log(`Selected phone number: ${selected.friendlyName} (${selected.sid})`);
+          
+          // 電話番号が取得できたらポーリングを停止
+          polling = false;
         } else {
           console.log("No phone numbers found in response");
           setPhoneNumbers([]);
@@ -91,11 +114,24 @@ export default function ChecklistAndConfig({
         }
       } catch (err) {
         console.error("Polling error:", err);
+        pollCount++;
+        
+        // エラーが続く場合はポーリングを停止
+        if (pollCount >= maxPolls) {
+          polling = false;
+        }
       }
     };
 
     pollChecks();
-    const intervalId = setInterval(() => polling && pollChecks(), 2000);
+    const intervalId = setInterval(() => {
+      if (polling && pollCount < maxPolls) {
+        pollChecks();
+      } else {
+        clearInterval(intervalId);
+      }
+    }, 5000); // 5秒間隔に変更
+    
     return () => {
       polling = false;
       clearInterval(intervalId);
@@ -128,6 +164,37 @@ export default function ChecklistAndConfig({
     }
   };
 
+  const refreshPhoneNumbers = async () => {
+    setIsRefreshing(true);
+    try {
+      const res = await fetch("/api/twilio/numbers");
+      if (!res.ok) {
+        const errorData = await res.json();
+        setPhoneNumbersError(errorData.error || res.statusText);
+        return;
+      }
+      const numbersData = await res.json();
+      setPhoneNumbersError(null);
+      
+      if (Array.isArray(numbersData) && numbersData.length > 0) {
+        setPhoneNumbers(numbersData);
+        const selected = numbersData.find((p: PhoneNumber) => p.sid === currentNumberSid) ||
+                        numbersData[0];
+        setCurrentNumberSid(selected.sid);
+        setCurrentVoiceUrl(selected.voiceUrl || "");
+        setSelectedPhoneNumber(selected.friendlyName || "");
+      } else {
+        setPhoneNumbers([]);
+        setPhoneNumbersError("電話番号が見つかりません。Twilio Consoleで電話番号を購入してください。");
+      }
+    } catch (err) {
+      console.error("Refresh error:", err);
+      setPhoneNumbersError("電話番号の更新に失敗しました");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const checklist = useMemo(() => {
     return [
       {
@@ -152,30 +219,77 @@ export default function ChecklistAndConfig({
         field:
           phoneNumbers.length > 0 ? (
             phoneNumbers.length === 1 ? (
-              <Input value={phoneNumbers[0].friendlyName || ""} disabled />
+              <div className="space-y-1">
+                <Input value={phoneNumbers[0].friendlyName || ""} disabled />
+                <div className="text-xs text-gray-500">
+                  {phoneNumbers[0].phoneNumber}
+                  {phoneNumbers[0].voiceUrl && (
+                    <span className="ml-2 text-green-600">✓ Webhook設定済み</span>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={refreshPhoneNumbers}
+                  disabled={isRefreshing}
+                  className="w-full"
+                >
+                  {isRefreshing ? (
+                    <Loader2 className="mr-2 h-4 animate-spin" />
+                  ) : (
+                    "更新"
+                  )}
+                </Button>
+              </div>
             ) : (
-              <Select
-                onValueChange={(value) => {
-                  setCurrentNumberSid(value);
-                  const selected = phoneNumbers.find((p) => p.sid === value);
-                  if (selected) {
-                    setSelectedPhoneNumber(selected.friendlyName || "");
-                    setCurrentVoiceUrl(selected.voiceUrl || "");
-                  }
-                }}
-                value={currentNumberSid}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="電話番号を選択" />
-                </SelectTrigger>
-                <SelectContent>
-                  {phoneNumbers.map((phone) => (
-                    <SelectItem key={phone.sid} value={phone.sid}>
-                      {phone.friendlyName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="space-y-2">
+                <Select
+                  onValueChange={(value) => {
+                    setCurrentNumberSid(value);
+                    const selected = phoneNumbers.find((p) => p.sid === value);
+                    if (selected) {
+                      setSelectedPhoneNumber(selected.friendlyName || "");
+                      setCurrentVoiceUrl(selected.voiceUrl || "");
+                    }
+                  }}
+                  value={currentNumberSid}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="電話番号を選択" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {phoneNumbers.map((phone) => (
+                      <SelectItem key={phone.sid} value={phone.sid}>
+                        <div className="flex flex-col">
+                          <span>{phone.friendlyName || phone.phoneNumber}</span>
+                          <span className="text-xs text-gray-500">
+                            {phone.phoneNumber}
+                            {phone.voiceUrl && (
+                              <span className="ml-1 text-green-600">✓ Webhook設定済み</span>
+                            )}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="text-xs text-gray-500">
+                  {phoneNumbers.length}個の電話番号が利用可能です
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={refreshPhoneNumbers}
+                  disabled={isRefreshing}
+                  className="w-full"
+                >
+                  {isRefreshing ? (
+                    <Loader2 className="mr-2 h-4 animate-spin" />
+                  ) : (
+                    "更新"
+                  )}
+                </Button>
+              </div>
             )
           ) : (
             <Button
@@ -234,6 +348,8 @@ export default function ChecklistAndConfig({
     phoneNumbersError,
     setSelectedPhoneNumber,
     shouldSkipWebhookUpdate,
+    isRefreshing,
+    refreshPhoneNumbers,
   ]);
 
   useEffect(() => {
