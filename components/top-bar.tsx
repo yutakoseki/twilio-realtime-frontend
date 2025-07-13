@@ -1,9 +1,39 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { BookOpen, FileText } from "lucide-react";
+import { BookOpen, FileText, Wifi, WifiOff, AlertCircle } from "lucide-react";
 import Link from "next/link";
 
-const TopBar = () => {
+type TopBarProps = {
+  wsStatus?: "connecting" | "connected" | "disconnected" | "error";
+};
+
+const TopBar: React.FC<TopBarProps> = ({ wsStatus = "disconnected" }) => {
+  const getStatusIcon = () => {
+    switch (wsStatus) {
+      case "connected":
+        return <Wifi className="w-4 h-4 text-green-500" />;
+      case "connecting":
+        return <Wifi className="w-4 h-4 text-yellow-500 animate-pulse" />;
+      case "error":
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
+      default:
+        return <WifiOff className="w-4 h-4 text-gray-400" />;
+    }
+  };
+
+  const getStatusText = () => {
+    switch (wsStatus) {
+      case "connected":
+        return "WebSocket接続済み";
+      case "connecting":
+        return "WebSocket接続中...";
+      case "error":
+        return "WebSocket接続エラー";
+      default:
+        return "WebSocket未接続";
+    }
+  };
+
   return (
     <div className="flex justify-between items-center px-6 py-4 border-b">
       <div className="flex items-center gap-4">
@@ -17,7 +47,12 @@ const TopBar = () => {
         </svg>
         <h1 className="text-xl font-semibold">OpenAI Call Assistant</h1>
       </div>
-      <div className="flex gap-3">
+      <div className="flex items-center gap-4">
+        {/* WebSocket接続状態インジケーター */}
+        <div className="flex items-center gap-2 text-sm">
+          {getStatusIcon()}
+          <span className="text-muted-foreground">{getStatusText()}</span>
+        </div>
         <Button variant="ghost" size="sm">
           <Link
             href="https://platform.openai.com/docs/guides/realtime"
