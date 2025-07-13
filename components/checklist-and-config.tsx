@@ -49,8 +49,15 @@ export default function ChecklistAndConfig({
   const isDevelopment = currentDomain.includes('localhost') || currentDomain.includes('127.0.0.1');
   const shouldSkipWebhookUpdate = isDevelopment;
 
+  // 既存のWebhook URLが正しく動作している場合は更新をスキップ
+  const hasWorkingWebhook = currentVoiceUrl && (
+    currentVoiceUrl.includes('openai-twilio-demo.codeknock.net') ||
+    currentVoiceUrl.includes('twiml') ||
+    currentVoiceUrl.includes('webhook')
+  );
+
   const isWebhookMismatch =
-    webhookUrl && currentVoiceUrl && webhookUrl !== currentVoiceUrl && !shouldSkipWebhookUpdate;
+    webhookUrl && currentVoiceUrl && webhookUrl !== currentVoiceUrl && !shouldSkipWebhookUpdate && !hasWorkingWebhook;
 
   useEffect(() => {
     let polling = true;
@@ -141,6 +148,11 @@ export default function ChecklistAndConfig({
   const updateWebhook = async () => {
     if (shouldSkipWebhookUpdate) {
       console.log("Skipping webhook update in development environment");
+      return;
+    }
+    
+    if (hasWorkingWebhook) {
+      console.log("Skipping webhook update - existing webhook is working");
       return;
     }
     
@@ -307,13 +319,22 @@ export default function ChecklistAndConfig({
       },
       {
         label: "Webhook URLの更新",
-        done: shouldSkipWebhookUpdate || (!!webhookUrl && !isWebhookMismatch),
+        done: shouldSkipWebhookUpdate || hasWorkingWebhook || (!!webhookUrl && !isWebhookMismatch),
         description: shouldSkipWebhookUpdate 
           ? "開発環境では自動的にスキップされます（本番環境で設定してください）"
+          : hasWorkingWebhook
+          ? "既存のWebhook URLが正常に動作しているため、更新は不要です"
           : "Twilioコンソールで手動設定することも可能です",
         field: shouldSkipWebhookUpdate ? (
           <div className="text-sm text-gray-500">
             開発環境では自動スキップ
+          </div>
+        ) : hasWorkingWebhook ? (
+          <div className="space-y-1">
+            <Input value={currentVoiceUrl} disabled className="w-full" />
+            <div className="text-xs text-green-600">
+              ✓ 既存のWebhookが正常に動作中
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-2 w-full">
@@ -350,6 +371,7 @@ export default function ChecklistAndConfig({
     shouldSkipWebhookUpdate,
     isRefreshing,
     refreshPhoneNumbers,
+    hasWorkingWebhook,
   ]);
 
   useEffect(() => {
