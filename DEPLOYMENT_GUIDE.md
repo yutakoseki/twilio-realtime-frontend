@@ -214,6 +214,11 @@ echo "WebSocket URL: wss://$ALB_DNS"
 Amplifyコンソールで環境変数を更新：
 - `NEXT_PUBLIC_WEBSOCKET_URL`: `wss://$ALB_DNS`
 
+NEXT_PUBLIC_WEBSOCKET_URLは$ALB_DNSではなく、カスタムドメインを設定すること！！！
+```sh
+NEXT_PUBLIC_WEBSOCKET_URL=	wss://openai-twilio-demo.codeknock.net
+```
+
 ### ステップ7: Twilioの設定
 
 #### 7.1 Twilioアカウントの準備
